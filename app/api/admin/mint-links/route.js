@@ -1,6 +1,10 @@
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
 export async function POST(req){
+  if (!supabaseAdmin) {
+    return new Response("Database not configured", { status: 500 });
+  }
+  
   const { quizId, emails, days=14, attempts=1 } = await req.json();
   if (!quizId || !Array.isArray(emails)) return new Response("Bad request", { status: 400 });
   const rows = emails.map(e => ({

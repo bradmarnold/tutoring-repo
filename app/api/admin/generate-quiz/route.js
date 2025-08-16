@@ -13,6 +13,10 @@ function weightedSample(items, k){
 }
 
 export async function POST(req){
+  if (!supabaseAdmin) {
+    return new Response("Database not configured", { status: 500 });
+  }
+  
   const { templateId, title } = await req.json();
   if (!templateId || !title) return new Response("Bad request", { status: 400 });
 

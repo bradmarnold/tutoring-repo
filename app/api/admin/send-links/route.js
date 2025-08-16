@@ -2,6 +2,10 @@ import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { sendMagicLink } from "@/lib/mailer";
 
 export async function POST(req){
+  if (!supabaseAdmin) {
+    return new Response("Database not configured", { status: 500 });
+  }
+  
   const { quizId, links } = await req.json();
   if (!quizId || !Array.isArray(links)) return new Response("Bad request", { status: 400 });
 

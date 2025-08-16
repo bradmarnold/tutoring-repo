@@ -1,6 +1,10 @@
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
 export async function POST(req) {
+  if (!supabaseAdmin) {
+    return new Response("Database not configured", { status: 500 });
+  }
+  
   try {
     const { quizId, token } = await req.json();
     if (!quizId || !token) return new Response("Bad request", { status: 400 });

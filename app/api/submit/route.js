@@ -3,6 +3,10 @@ import { openai, OPENAI_MODEL } from "@/lib/openaiClient";
 
 async function explainMistakes(items, quizTitle) {
   if (items.length === 0) return [];
+  if (!openai) {
+    return items.map(() => "AI explanations are not available - OpenAI not configured.");
+  }
+  
   const lines = items.map((it, i) => (
     `Q${i+1}: ${it.prompt}\n` +
     `Options: ${JSON.stringify(it.options)}\n` +
@@ -11,13 +15,23 @@ async function explainMistakes(items, quizTitle) {
   )).join("\n\n");
   const system = `You are a calm tutor. Explain in simple steps. Be concise. Avoid jargon. Provide formulas where helpful.`;
   const user = `Quiz: ${quizTitle}. For each item below, explain why the correct answer is correct and what concept the student missed. Use numbered steps.\n\n${lines}`;
-  const resp = await openai.responses.create({ model: OPENAI_MODEL, input: [{ role: "system", content: system }, { role: "user", content: user }] });
-  const text = resp.output_text || "";
-  const chunks = text.split(/\n\s*Q\d+[:\.]/i).filter(Boolean);
-  return chunks.length === items.length ? chunks : items.map(() => text);
+  
+  try {
+    const resp = await openai.responses.create({ model: OPENAI_MODEL, input: [{ role: "system", content: system }, { role: "user", content: user }] });
+    const text = resp.output_text || "";
+    const chunks = text.split(/\n\s*Q\d+[:\.]/i).filter(Boolean);
+    return chunks.length === items.length ? chunks : items.map(() => text);
+  } catch (error) {
+    console.error("OpenAI API error:", error);
+    return items.map(() => "Unable to generate explanation at this time.");
+  }
 }
 
 export async function POST(req) {
+  if (!supabaseAdmin) {
+    return new Response("Database not configured", { status: 500 });
+  }
+  
   try {
     const { attemptId, answers } = await req.json();
     if (!attemptId || !answers) return new Response("Bad request", { status: 400 });
