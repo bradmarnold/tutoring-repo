@@ -84,9 +84,18 @@ export default function QuizPage({ params }) {
         {endTime && <QuizTimer endTime={endTime} onExpire={submit} />}
       </header>
       <div className="space-y-4">
-        {questions.map((q, idx) => (
-          <QuestionCard key={q.id} q={q} index={idx} value={answers[q.id]} onChange={(i) => setAnswers(a => ({ ...a, [q.id]: i }))} />
-        ))}
+        {questions.map((q, idx) => {
+          const questionKey = q.item_id || q.id; // Support both new and legacy format
+          return (
+            <QuestionCard 
+              key={questionKey} 
+              q={q} 
+              index={idx} 
+              value={answers[questionKey]} 
+              onChange={(i) => setAnswers(a => ({ ...a, [questionKey]: i }))} 
+            />
+          );
+        })}
       </div>
       <button onClick={submit} className="px-4 py-2 rounded-xl bg-black text-white">Submit</button>
     </main>

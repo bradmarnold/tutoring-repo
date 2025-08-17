@@ -59,60 +59,130 @@ export async function POST(req) {
       .eq("id", attempt.quiz_id)
       .single();
 
-    const { data: qs } = await supabaseAdmin
-      .from("questions")
-      .select("id, prompt, options, correct_index, points")
-      .eq("quiz_id", attempt.quiz_id);
+    // Check if this attempt has attempt_items (new system) or uses legacy questions
+    const { data: attemptItems } = await supabaseAdmin
+      .from("attempt_items")
+      .select("id, source, question_id, bank_id, prompt, options, correct_index, points")
+      .eq("attempt_id", attemptId);
 
     let score = 0;
     const details = [];
     const wrong = [];
 
-    for (const q of qs) {
-      const sel = answers[q.id];
-      const options = Array.isArray(q.options) ? q.options : q.options?.options || [];
-      const isCorrect = Number(sel) === Number(q.correct_index);
-      if (isCorrect) score += q.points;
+    if (attemptItems && attemptItems.length > 0) {
+      // New system: use attempt_items snapshots
+      for (const item of attemptItems) {
+        const sel = answers[item.id]; // answers keyed by attempt_item_id
+        const options = Array.isArray(item.options) ? item.options : item.options?.options || [];
+        const isCorrect = Number(sel) === Number(item.correct_index);
+        if (isCorrect) score += item.points;
 
-      const row = {
-        question_id: q.id,
-        selected_index: sel,
-        is_correct: isCorrect,
-        correct: isCorrect,                 // <-- expose for UI that expects `correct`
-        prompt: q.prompt,
-        options,
-        correctText: options[q.correct_index],
-        selectedText: sel != null ? options[sel] : "(no answer)",
-        explanation: null
-      };
-      details.push(row);
-      if (!isCorrect) {
-        wrong.push(row); // we will fill row.explanation below
+        // Get TEKS code if from bank
+        let teks_code = null;
+        if (item.source === 'bank' && item.bank_id) {
+          const { data: bankItem } = await supabaseAdmin
+            .from("question_bank")
+            .select("teks_code")
+            .eq("id", item.bank_id)
+            .single();
+          teks_code = bankItem?.teks_code;
+        }
+
+        const row = {
+          attempt_item_id: item.id,
+          selected_index: sel,
+          is_correct: isCorrect,
+          correct: isCorrect,
+          prompt: item.prompt,
+          options,
+          correctText: options[item.correct_index],
+          selectedText: sel != null ? options[sel] : "(no answer)",
+          explanation: null,
+          teks_code
+        };
+        details.push(row);
+        if (!isCorrect) {
+          wrong.push(row);
+        }
       }
+
+      const totalPoints = attemptItems.reduce((s, item) => s + item.points, 0);
+
+      // Get explanations for wrong answers
+      const exps = await explainMistakes(wrong, quiz.title);
+      wrong.forEach((row, i) => { row.explanation = exps[i] || ""; });
+
+      // Persist answers using attempt_item_id
+      const answersRows = details.map(d => ({
+        attempt_id: attempt.id,
+        attempt_item_id: d.attempt_item_id,
+        question_id: null, // for compatibility
+        selected_index: d.selected_index ?? -1,
+        is_correct: d.is_correct,
+        explanation: d.explanation || null,
+      }));
+      await supabaseAdmin.from("answers").upsert(answersRows);
+
+      await supabaseAdmin
+        .from("attempts")
+        .update({ finished: true, score })
+        .eq("id", attempt.id);
+
+      return Response.json({ score, totalPoints, details });
+    } else {
+      // Legacy system: use static questions
+      const { data: qs } = await supabaseAdmin
+        .from("questions")
+        .select("id, prompt, options, correct_index, points, teks_code")
+        .eq("quiz_id", attempt.quiz_id);
+
+      for (const q of qs) {
+        const sel = answers[q.id];
+        const options = Array.isArray(q.options) ? q.options : q.options?.options || [];
+        const isCorrect = Number(sel) === Number(q.correct_index);
+        if (isCorrect) score += q.points;
+
+        const row = {
+          question_id: q.id,
+          selected_index: sel,
+          is_correct: isCorrect,
+          correct: isCorrect,
+          prompt: q.prompt,
+          options,
+          correctText: options[q.correct_index],
+          selectedText: sel != null ? options[sel] : "(no answer)",
+          explanation: null,
+          teks_code: q.teks_code
+        };
+        details.push(row);
+        if (!isCorrect) {
+          wrong.push(row);
+        }
+      }
+
+      const totalPoints = qs.reduce((s, q) => s + q.points, 0);
+
+      // Get explanations for wrong answers
+      const exps = await explainMistakes(wrong, quiz.title);
+      wrong.forEach((row, i) => { row.explanation = exps[i] || ""; });
+
+      // Persist answers (legacy format)
+      const answersRows = details.map(d => ({
+        attempt_id: attempt.id,
+        question_id: d.question_id,
+        selected_index: d.selected_index ?? -1,
+        is_correct: d.is_correct,
+        explanation: d.explanation || null,
+      }));
+      await supabaseAdmin.from("answers").upsert(answersRows);
+
+      await supabaseAdmin
+        .from("attempts")
+        .update({ finished: true, score })
+        .eq("id", attempt.id);
+
+      return Response.json({ score, totalPoints, details });
     }
-
-    const totalPoints = qs.reduce((s, q) => s + q.points, 0);
-
-    // --- get explanations, then merge onto the same detail rows ---
-    const exps = await explainMistakes(wrong, quiz.title);
-    wrong.forEach((row, i) => { row.explanation = exps[i] || ""; });
-
-    // persist answers (now includes explanation for wrong items)
-    const answersRows = details.map(d => ({
-      attempt_id: attempt.id,
-      question_id: d.question_id,
-      selected_index: d.selected_index ?? -1,
-      is_correct: d.is_correct,
-      explanation: d.explanation || null,
-    }));
-    await supabaseAdmin.from("answers").upsert(answersRows);
-
-    await supabaseAdmin
-      .from("attempts")
-      .update({ finished: true, score })
-      .eq("id", attempt.id);
-
-    return Response.json({ score, totalPoints, details });
   } catch (e) {
     console.error("submit error:", e?.message || e);
     return new Response("Server error", { status: 500 });

@@ -42,29 +42,87 @@ export async function POST(req) {
       .limit(1);
     const quiz = quizRows?.[0];
 
-    const { data: questions } = await supabaseAdmin
-      .from("questions")
-      .select("id, prompt, options, correct_index, points")
-      .eq("quiz_id", quizId)
-      .order("created_at", { ascending: true })
-      .maybeSingle();
+    // Check for quiz pools
+    const { data: pools } = await supabaseAdmin
+      .from("quiz_pools")
+      .select("id, topic_id, difficulty, draw_count")
+      .eq("quiz_id", quizId);
 
-    let qs = [];
-    if (!questions) {
-      const { data: qsAll } = await supabaseAdmin
+    let attemptItems = [];
+
+    if (!pools || pools.length === 0) {
+      // No pools - use static questions (legacy behavior)
+      const { data: questions } = await supabaseAdmin
         .from("questions")
         .select("id, prompt, options, correct_index, points")
-        .eq("quiz_id", quizId);
-      qs = qsAll || [];
+        .eq("quiz_id", quizId)
+        .order("created_at", { ascending: true });
+
+      const qs = questions || [];
+      
+      // Create attempt_items snapshots for static questions
+      for (const q of qs) {
+        attemptItems.push({
+          attempt_id: attemptRow.id,
+          source: 'static',
+          question_id: q.id,
+          bank_id: null,
+          prompt: q.prompt,
+          options: q.options,
+          correct_index: q.correct_index,
+          points: q.points || 1
+        });
+      }
     } else {
-      qs = Array.isArray(questions) ? questions : [questions];
+      // Pools exist - sample from question bank
+      for (const pool of pools) {
+        const { data: bankItems } = await supabaseAdmin
+          .from("question_bank")
+          .select("id, prompt, options, correct_index, teks_code")
+          .eq("topic_id", pool.topic_id)
+          .eq("difficulty", pool.difficulty);
+
+        if (bankItems && bankItems.length > 0) {
+          // Randomly sample items
+          const shuffled = bankItems.sort(() => Math.random() - 0.5);
+          const sampled = shuffled.slice(0, Math.min(pool.draw_count, bankItems.length));
+
+          for (const item of sampled) {
+            attemptItems.push({
+              attempt_id: attemptRow.id,
+              source: 'bank',
+              question_id: null,
+              bank_id: item.id,
+              prompt: item.prompt,
+              options: item.options,
+              correct_index: item.correct_index,
+              points: 1
+            });
+          }
+        }
+      }
     }
 
-    // Shuffle questions order per attempt
-    qs.sort(() => Math.random() - 0.5);
+    // Insert attempt_items snapshots
+    if (attemptItems.length > 0) {
+      const { data: insertedItems, error: itemsError } = await supabaseAdmin
+        .from("attempt_items")
+        .insert(attemptItems)
+        .select("id, prompt, options, points");
+      if (itemsError) throw itemsError;
+      attemptItems = insertedItems;
+    }
 
-    // Mask correct_index before returning 
-    const masked = qs.map(({ correct_index, ...rest }) => rest);
+    // Shuffle final order
+    attemptItems.sort(() => Math.random() - 0.5);
+
+    // Build masked response using attempt_items
+    const masked = attemptItems.map((item) => ({
+      item_id: item.id,
+      prompt: item.prompt,
+      options: item.options,
+      points: item.points
+    }));
 
     return Response.json({ attempt: attemptRow, quiz, questions: masked });
   } catch (e) {
