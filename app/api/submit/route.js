@@ -19,15 +19,15 @@ async function explainMistakes(items, quizTitle) {
     const system = "You are a calm tutor. Explain in short, numbered steps. Use plain language and show formulas when helpful.";
     const user = `Quiz: ${quizTitle}. For each item below, explain why the correct answer is correct and what concept the student likely missed. Keep each explanation under 120 words.\n\n${lines}`;
 
-    const resp = await openai.responses.create({
+    const resp = await openai.chat.completions.create({
       model: OPENAI_MODEL || "gpt-4.1-mini",
-      input: [
+      messages: [
         { role: "system", content: system },
         { role: "user", content: user }
       ]
     });
 
-    const text = resp?.output_text || "";
+    const text = resp?.choices?.[0]?.message?.content || "";
     const parts = text.split(/\n\s*Q\d+[:\.]/i).filter(Boolean);
     return parts.length === items.length ? parts : items.map(() => text || "Explanation coming soon.");
   } catch (err) {

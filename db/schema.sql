@@ -17,7 +17,8 @@ create table if not exists questions (
   correct_index integer not null,
   points integer not null default 1,
   created_at timestamptz default now(),
-  bank_question_id uuid
+  bank_question_id uuid,
+  teks_code text
 );
 
 create table if not exists student_links (
@@ -145,3 +146,17 @@ returns table(topic text, attempts int, correct int, accuracy numeric) language 
   group by t.name
   order by accuracy asc, attempts desc;
 $$;
+
+-- TEKS support
+alter table questions add column if not exists teks_code text;
+create index if not exists idx_questions_teks on questions(teks_code);
+
+-- TEKS analytics view
+create or replace view v_teks_accuracy as
+select q.quiz_id, q.teks_code,
+       count(*) filter (where a.is_correct) as correct,
+       count(*) as total
+from answers a
+join questions q on q.id = a.question_id
+where q.teks_code is not null
+group by 1,2;

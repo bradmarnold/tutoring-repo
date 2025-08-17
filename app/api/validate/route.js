@@ -60,6 +60,10 @@ export async function POST(req) {
       qs = Array.isArray(questions) ? questions : [questions];
     }
 
+    // Shuffle questions order per attempt
+    qs.sort(() => Math.random() - 0.5);
+
+    // Mask correct_index before returning 
     const masked = qs.map(({ correct_index, ...rest }) => rest);
 
     return Response.json({ attempt: attemptRow, quiz, questions: masked });
