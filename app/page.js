@@ -1,4 +1,5 @@
 import Link from "next/link";
+import DemoLauncher from "@/components/DemoLauncher"; // ⬅️ add this line
 
 export default function Home() {
   return (
@@ -32,11 +33,12 @@ export default function Home() {
         </div>
       </section>
 
-      <section id="quizzes" className="border rounded-2xl p-6">
-        <h3 className="text-lg font-semibold">Demo</h3>
-        <p className="text-slate-700">Use your tokenized link. Example format:</p>
-        <code className="block mt-2 bg-slate-100 p-3 rounded">/quiz/QUIZ_ID?token=YOUR_TOKEN</code>
-      </section>
+     <section id="quizzes" className="border rounded-2xl p-6 space-y-3">
+  <h3 className="text-lg font-semibold">Try a demo quiz</h3>
+  <p className="text-slate-700">Paste a Quiz ID + token, or start a public demo.</p>
+  <DemoLauncher />
+</section>
+
     </main>
   );
 }
