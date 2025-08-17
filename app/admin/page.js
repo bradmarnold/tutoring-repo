@@ -206,6 +206,34 @@ export default function AdminHome() {
         </button>
       </div>
 
+      {/* Navigation */}
+      <div className="flex gap-4 text-sm">
+        <a 
+          href="/admin"
+          className="px-4 py-2 border rounded-xl hover:bg-slate-50 bg-slate-100"
+        >
+          Dashboard
+        </a>
+        <a 
+          href="/admin/ai"
+          className="px-4 py-2 border rounded-xl hover:bg-slate-50"
+        >
+          AI Generator
+        </a>
+        <a 
+          href="/admin/pools"
+          className="px-4 py-2 border rounded-xl hover:bg-slate-50"
+        >
+          Quiz Pools
+        </a>
+        <a 
+          href="/admin/analytics"
+          className="px-4 py-2 border rounded-xl hover:bg-slate-50"
+        >
+          Analytics
+        </a>
+      </div>
+
       <div className="grid lg:grid-cols-2 gap-8">
         {/* Create Quiz */}
         <div className="border rounded-2xl p-6 space-y-4">

@@ -188,6 +188,34 @@ export default function AiGeneratorPage() {
         </button>
       </div>
 
+      {/* Navigation */}
+      <div className="flex gap-4 text-sm">
+        <a 
+          href="/admin"
+          className="px-4 py-2 border rounded-xl hover:bg-slate-50"
+        >
+          Dashboard
+        </a>
+        <a 
+          href="/admin/ai"
+          className="px-4 py-2 border rounded-xl hover:bg-slate-50 bg-slate-100"
+        >
+          AI Generator
+        </a>
+        <a 
+          href="/admin/pools"
+          className="px-4 py-2 border rounded-xl hover:bg-slate-50"
+        >
+          Quiz Pools
+        </a>
+        <a 
+          href="/admin/analytics"
+          className="px-4 py-2 border rounded-xl hover:bg-slate-50"
+        >
+          Analytics
+        </a>
+      </div>
+
       {/* Generation Form */}
       <div className="border rounded-2xl p-6 space-y-4">
         <h2 className="text-xl font-semibold">Generate Questions</h2>
