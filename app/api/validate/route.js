@@ -1,5 +1,20 @@
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
+// Normalize difficulty helper: map { medium→med }
+function normalizeDifficulty(difficulty) {
+  if (difficulty === 'medium') return 'med';
+  return difficulty;
+}
+
+// Fisher-Yates shuffle algorithm
+function shuffleArray(array) {
+  for (let i = array.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [array[i], array[j]] = [array[j], array[i]];
+  }
+  return array;
+}
+
 export async function POST(req) {
   if (!supabaseAdmin) {
     return new Response("Database not configured", { status: 500 });
@@ -9,6 +24,7 @@ export async function POST(req) {
     const { quizId, token } = await req.json();
     if (!quizId || !token) return new Response("Bad request", { status: 400 });
 
+    // 1) Verify student_links (token+quizId), check expiry + max attempts
     const { data: links, error: linkErr } = await supabaseAdmin
       .from("student_links")
       .select("id, student_email, max_attempts, expires_at, quiz_id, quizzes:quiz_id(duration_seconds, title)")
@@ -27,6 +43,7 @@ export async function POST(req) {
       .eq("student_email", link.student_email);
     if (count >= link.max_attempts) return new Response("Attempt limit reached", { status: 403 });
 
+    // 2) Create attempt with ends_at = now + quizzes.duration_seconds
     const endsAt = new Date(Date.now() + 1000 * link.quizzes.duration_seconds).toISOString();
     const { data: attemptRow, error: aErr } = await supabaseAdmin
       .from("attempts")
@@ -42,7 +59,7 @@ export async function POST(req) {
       .limit(1);
     const quiz = quizRows?.[0];
 
-    // Check for quiz pools
+    // 3) Try pooled sampling
     const { data: pools } = await supabaseAdmin
       .from("quiz_pools")
       .select("id, topic_id, difficulty, draw_count")
@@ -50,49 +67,33 @@ export async function POST(req) {
 
     let attemptItems = [];
 
-    if (!pools || pools.length === 0) {
-      // No pools - use static questions (legacy behavior)
-      const { data: questions } = await supabaseAdmin
-        .from("questions")
-        .select("id, prompt, options, correct_index, points")
-        .eq("quiz_id", quizId)
-        .order("created_at", { ascending: true });
-
-      const qs = questions || [];
-      
-      // Create attempt_items snapshots for static questions
-      for (const q of qs) {
-        attemptItems.push({
-          attempt_id: attemptRow.id,
-          source: 'static',
-          question_id: q.id,
-          bank_id: null,
-          prompt: q.prompt,
-          options: q.options,
-          correct_index: q.correct_index,
-          points: q.points || 1
-        });
-      }
-    } else {
-      // Pools exist - sample from question bank
+    if (pools && pools.length > 0) {
+      // Sample from question bank using pools
       for (const pool of pools) {
+        const normalizedDifficulty = normalizeDifficulty(pool.difficulty);
         const { data: bankItems } = await supabaseAdmin
           .from("question_bank")
           .select("id, prompt, options, correct_index, teks_code")
           .eq("topic_id", pool.topic_id)
-          .eq("difficulty", pool.difficulty);
+          .eq("difficulty", normalizedDifficulty)
+          .order('created_at', { ascending: false }); // Use ORDER BY for stable randomization
 
         if (bankItems && bankItems.length > 0) {
-          // Randomly sample items
-          const shuffled = bankItems.sort(() => Math.random() - 0.5);
-          const sampled = shuffled.slice(0, Math.min(pool.draw_count, bankItems.length));
+          // Sample draw_count rows with ORDER BY random()
+          const { data: sampledItems } = await supabaseAdmin
+            .from("question_bank")
+            .select("id, prompt, options, correct_index, teks_code")
+            .eq("topic_id", pool.topic_id)
+            .eq("difficulty", normalizedDifficulty)
+            .order('random()')
+            .limit(pool.draw_count);
 
-          for (const item of sampled) {
+          for (const item of sampledItems || []) {
             attemptItems.push({
               attempt_id: attemptRow.id,
               source: 'bank',
               question_id: null,
-              bank_id: item.id,
+              bank_item_id: item.id,
               prompt: item.prompt,
               options: item.options,
               correct_index: item.correct_index,
@@ -100,6 +101,32 @@ export async function POST(req) {
             });
           }
         }
+      }
+    }
+
+    // 4) Else fallback: Load legacy questions
+    if (attemptItems.length === 0) {
+      const { data: questions } = await supabaseAdmin
+        .from("questions")
+        .select("id, prompt, options, correct_index, points")
+        .eq("quiz_id", quizId)
+        .order("created_at", { ascending: true });
+
+      const qs = questions || [];
+      shuffleArray(qs); // Shuffle legacy questions
+      
+      // Create attempt_items snapshots for static questions
+      for (const q of qs) {
+        attemptItems.push({
+          attempt_id: attemptRow.id,
+          source: 'static',
+          question_id: q.id,
+          bank_item_id: null,
+          prompt: q.prompt,
+          options: q.options,
+          correct_index: q.correct_index,
+          points: q.points || 1
+        });
       }
     }
 
@@ -113,12 +140,12 @@ export async function POST(req) {
       attemptItems = insertedItems;
     }
 
-    // Shuffle final order
-    attemptItems.sort(() => Math.random() - 0.5);
+    // 5) Always shuffle final list (Fisher–Yates)
+    shuffleArray(attemptItems);
 
-    // Build masked response using attempt_items
+    // Build masked client payload: [{ attempt_item_id, prompt, options, points }, ...]
     const masked = attemptItems.map((item) => ({
-      item_id: item.id,
+      attempt_item_id: item.id,
       prompt: item.prompt,
       options: item.options,
       points: item.points
@@ -126,6 +153,7 @@ export async function POST(req) {
 
     return Response.json({ attempt: attemptRow, quiz, questions: masked });
   } catch (e) {
+    console.error("Validate error:", e?.message || e);
     return new Response("Server error", { status: 500 });
   }
 }

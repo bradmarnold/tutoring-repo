@@ -11,89 +11,64 @@ export async function GET(req) {
   }
 
   try {
-    const url = new URL(req.url);
-    const quizId = url.searchParams.get("quiz_id");
-    
-    if (!quizId) {
-      return new Response("quiz_id parameter is required", { status: 400 });
-    }
-
-    // Get TEKS analytics from both legacy questions and new attempt_items
+    // Return { teks_code, attempts, correct, accuracy } across answers joined to attempt_items/question_bank
     const teksMap = new Map();
 
-    // Get analytics from legacy questions
+    // Get analytics from attempt_items (new system)
+    const { data: attemptItemResults } = await supabaseAdmin
+      .from("answers")
+      .select(`
+        is_correct,
+        attempt_items!inner(
+          bank_item_id,
+          question_bank!attempt_items_bank_item_id_fkey(teks_code)
+        )
+      `)
+      .not("attempt_item_id", "is", null)
+      .not("attempt_items.question_bank.teks_code", "is", null);
+
+    // Process attempt_items results
+    for (const result of attemptItemResults || []) {
+      const teks = result.attempt_items?.question_bank?.teks_code;
+      if (teks) {
+        if (!teksMap.has(teks)) {
+          teksMap.set(teks, { attempts: 0, correct: 0 });
+        }
+        const stats = teksMap.get(teks);
+        stats.attempts++;
+        if (result.is_correct) stats.correct++;
+      }
+    }
+
+    // Get analytics from legacy questions (fallback)
     const { data: legacyResults } = await supabaseAdmin
       .from("answers")
       .select(`
         is_correct,
-        questions!inner(teks_code),
-        attempts!inner(quiz_id)
+        questions!inner(teks_code)
       `)
-      .eq("attempts.quiz_id", quizId)
+      .is("attempt_item_id", null)
       .not("questions.teks_code", "is", null);
 
     // Process legacy results
     for (const result of legacyResults || []) {
       const teks = result.questions.teks_code;
-      if (!teksMap.has(teks)) {
-        teksMap.set(teks, { total: 0, correct: 0 });
-      }
-      const stats = teksMap.get(teks);
-      stats.total++;
-      if (result.is_correct) stats.correct++;
-    }
-
-    // Get analytics from attempt_items (bank questions)
-    const { data: bankResults } = await supabaseAdmin
-      .from("answers")
-      .select(`
-        is_correct,
-        attempt_items!inner(
-          bank_id,
-          attempts!inner(quiz_id)
-        )
-      `)
-      .eq("attempt_items.attempts.quiz_id", quizId)
-      .not("attempt_item_id", "is", null);
-
-    // For bank results, we need to get TEKS codes separately
-    const bankItemIds = [...new Set((bankResults || [])
-      .map(r => r.attempt_items?.bank_id)
-      .filter(Boolean))];
-
-    if (bankItemIds.length > 0) {
-      const { data: bankItems } = await supabaseAdmin
-        .from("question_bank")
-        .select("id, teks_code")
-        .in("id", bankItemIds)
-        .not("teks_code", "is", null);
-
-      const bankTeksMap = new Map();
-      for (const item of bankItems || []) {
-        bankTeksMap.set(item.id, item.teks_code);
-      }
-
-      // Process bank results
-      for (const result of bankResults || []) {
-        const bankId = result.attempt_items?.bank_id;
-        const teks = bankTeksMap.get(bankId);
-        if (teks) {
-          if (!teksMap.has(teks)) {
-            teksMap.set(teks, { total: 0, correct: 0 });
-          }
-          const stats = teksMap.get(teks);
-          stats.total++;
-          if (result.is_correct) stats.correct++;
+      if (teks) {
+        if (!teksMap.has(teks)) {
+          teksMap.set(teks, { attempts: 0, correct: 0 });
         }
+        const stats = teksMap.get(teks);
+        stats.attempts++;
+        if (result.is_correct) stats.correct++;
       }
     }
 
-    // Convert to array format with accuracy calculation
+    // Convert to required format: { teks_code, attempts, correct, accuracy }
     const results = Array.from(teksMap.entries()).map(([teks_code, stats]) => ({
       teks_code,
-      total: stats.total,
+      attempts: stats.attempts,
       correct: stats.correct,
-      accuracy: stats.total > 0 ? (stats.correct / stats.total * 100).toFixed(1) : "0.0"
+      accuracy: stats.attempts > 0 ? (stats.correct / stats.attempts).toFixed(3) : "0.000"
     })).sort((a, b) => a.teks_code.localeCompare(b.teks_code));
 
     return Response.json(results);

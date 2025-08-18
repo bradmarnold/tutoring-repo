@@ -4,14 +4,14 @@ export async function POST(req){
   const { password } = await req.json();
   if (password !== process.env.ADMIN_PASSWORD) return new Response("No", { status: 401 });
   
-  // Use secure: false for localhost development
+  // Set httpOnly cookie: admin=1 with proper security settings
   const isProduction = process.env.NODE_ENV === 'production';
-  cookies().set("admin", process.env.ADMIN_PASSWORD, { 
+  cookies().set("admin", "1", { 
     httpOnly: true, 
     sameSite: "lax", 
     secure: isProduction, 
     path: "/", 
-    maxAge: 60*60*24*7 
+    maxAge: 7200 // 2 hours as specified
   });
   return new Response("OK");
 }
