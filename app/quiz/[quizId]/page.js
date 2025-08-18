@@ -85,14 +85,14 @@ export default function QuizPage({ params }) {
       </header>
       <div className="space-y-4">
         {questions.map((q, idx) => {
-          const questionKey = q.item_id || q.id; // Support both new and legacy format
+          const qKey = q.attempt_item_id ?? q.item_id ?? q.id ?? idx; // Support all formats, consistent with QuestionCard
           return (
             <QuestionCard 
-              key={questionKey} 
+              key={qKey} 
               q={q} 
               index={idx} 
-              value={answers[questionKey]} 
-              onChange={(i) => setAnswers(a => ({ ...a, [questionKey]: i }))} 
+              value={answers[qKey]} 
+              onChange={(i) => setAnswers(a => ({ ...a, [qKey]: i }))} 
             />
           );
         })}

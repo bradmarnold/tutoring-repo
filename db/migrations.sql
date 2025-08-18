@@ -23,7 +23,7 @@ create table if not exists question_bank (
   created_by text,
   created_at timestamptz default now()
 );
-create index if not exists idx_qbank_topic on question_bank(topic_id);
+create index if not exists idx_qbank_topic_difficulty on question_bank(topic_id, difficulty);
 create index if not exists idx_qbank_teks on question_bank(teks_code);
 
 -- 3) Pools attach to quizzes and specify draws
@@ -43,7 +43,7 @@ create table if not exists attempt_items (
   attempt_id uuid references attempts(id) on delete cascade,
   source text check (source in ('static','bank')) not null,
   question_id uuid,         -- if source='static' (from questions.id)
-  bank_id uuid,             -- if source='bank'   (from question_bank.id)
+  bank_item_id uuid,        -- if source='bank'   (from question_bank.id)
   prompt text not null,
   options jsonb not null,
   correct_index int not null,
@@ -56,4 +56,10 @@ alter table answers drop constraint if exists answers_pkey;
 alter table answers drop constraint if exists answers_question_id_fkey;
 alter table answers add column if not exists attempt_item_id uuid;
 alter table answers alter column question_id drop not null;
-alter table answers add constraint answers_pk primary key (attempt_id, attempt_item_id);
+-- Only create the new primary key if it doesn't exist
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'answers_pk') then
+    alter table answers add constraint answers_pk primary key (attempt_id, attempt_item_id);
+  end if;
+end $$;
